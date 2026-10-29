@@ -1,59 +1,81 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Admin;
 
-use App\Models\Budaya;
-use App\Models\Kategori;
+use App\Http\Controllers\Controller;
+use App\Models\Category;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
-class BudayaController extends Controller
+class CategoryController extends Controller
 {
-    public function index(Request $request)
+    public function index()
     {
-        // Batasi panjang kata kunci, lalu escape karakter wildcard LIKE
-        $q = Str::limit(trim((string) $request->query('q')), 100, '');
-        $kategoriSlug = (string) $request->query('kategori');
-        $like = '%' . addcslashes($q, '%_\\') . '%';
+        $categories = Category::orderBy('name')->paginate(10);
 
-        $kategoris = Kategori::orderBy('nama')->get();
-
-        $budayas = Budaya::published()
-            ->with('kategori')
-            ->when($q !== '', function ($query) use ($like) {
-                $query->where(function ($w) use ($like) {
-                    $w->where('judul', 'like', $like)
-                      ->orWhere('ringkasan', 'like', $like)
-                      ->orWhere('deskripsi', 'like', $like);
-                });
-            })
-            ->when($kategoriSlug !== '', function ($query) use ($kategoriSlug) {
-                $query->whereHas('kategori', fn ($k) => $k->where('slug', $kategoriSlug));
-            })
-            ->latest()
-            ->orderByDesc('id')
-            ->paginate(9)
-            ->withQueryString();
-
-        return view('budaya.index', compact('budayas', 'kategoris', 'q', 'kategoriSlug'));
+        return view('admin.categories.index', compact('categories'));
     }
 
-    public function show(string $slug)
+    public function create()
     {
-        $budaya = Budaya::published()
-            ->with(['kategori', 'sumbers'])
-            ->where('slug', $slug)
-            ->firstOrFail();
+        return view('admin.categories.create');
+    }
 
-        $terkait = Budaya::published()
-            ->with('kategori')
-            ->where('kategori_id', $budaya->kategori_id)
-            ->where('id', '!=', $budaya->id)
-            ->latest()
-            ->orderByDesc('id')
-            ->take(3)
-            ->get();
+    public function store(Request $request)
+    {
+        $data = $this->validated($request);
 
-        return view('budaya.show', compact('budaya', 'terkait'));
+        Category::create($data);
+
+        return redirect()->route('admin.categories.index')
+            ->with('success', 'Kategori berhasil ditambahkan.');
+    }
+
+    public function edit(Category $category)
+    {
+        return view('admin.categories.edit', compact('category'));
+    }
+
+    public function update(Request $request, Category $category)
+    {
+        $data = $this->validated($request, $category);
+
+        $category->update($data);
+
+        return redirect()->route('admin.categories.index')
+            ->with('success', 'Kategori berhasil diperbarui.');
+    }
+
+    public function destroy(Category $category)
+    {
+        $category->delete();
+
+        return redirect()->route('admin.categories.index')
+            ->with('success', 'Kategori berhasil dihapus.');
+    }
+
+    private function validated(Request $request, ?Category $category = null): array
+    {
+        $request->merge(['slug' => Str::slug((string) $request->input('name'))]);
+
+        return $request->validate([
+            'name' => [
+                'required', 'string', 'max:100',
+                Rule::unique('categories', 'name')->ignore($category?->id),
+            ],
+            'slug' => [
+                'required',
+                Rule::unique('categories', 'slug')->ignore($category?->id),
+            ],
+            'description' => ['nullable', 'string', 'max:500'],
+        ], [
+            'name.required'   => 'Nama kategori wajib diisi.',
+            'name.max'        => 'Nama kategori maksimal 100 karakter.',
+            'name.unique'     => 'Nama kategori sudah digunakan.',
+            'slug.required'   => 'Nama kategori harus mengandung huruf atau angka.',
+            'slug.unique'     => 'Nama kategori terlalu mirip dengan kategori lain.',
+            'description.max' => 'Deskripsi maksimal 500 karakter.',
+        ]);
     }
 }
